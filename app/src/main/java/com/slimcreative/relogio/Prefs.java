@@ -34,6 +34,11 @@ public final class Prefs {
 
     public static void setVibes(Context c, int n) { sp(c).edit().putInt("vibes", n).apply(); }
 
+    /** Cor do texto (hora) no fundo personalizado. */
+    public static int dialColor(Context c) { return sp(c).getInt("dialColor", 0xFFFFFFFF); }
+
+    public static void setDialColor(Context c, int color) { sp(c).edit().putInt("dialColor", color).apply(); }
+
     public static void setApps(Context c, Set<String> apps) {
         sp(c).edit().putStringSet("apps", new HashSet<>(apps)).apply();
     }

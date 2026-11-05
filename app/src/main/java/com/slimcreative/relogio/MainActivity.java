@@ -18,6 +18,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Matrix;
+import android.graphics.drawable.GradientDrawable;
 import android.media.ExifInterface;
 import android.net.Uri;
 import android.graphics.Typeface;
@@ -137,6 +138,30 @@ public class MainActivity extends Activity {
         preview.setLayoutParams(plp);
         preview.setVisibility(View.GONE);
         c5.addView(preview);
+        c5.addView(text("Cor da hora e do texto", 14, Color.LTGRAY));
+        int[] colors = {0xFFFFFFFF, 0xFFFFEB3B, 0xFFFF9800, 0xFFF44336, 0xFFC05A7E, 0xFFE91E63,
+                0xFF9C27B0, 0xFF3F51B5, 0xFF2196F3, 0xFF00BCD4, 0xFF4CAF50, 0xFF9E9E9E};
+        LinearLayout row = null;
+        for (int i = 0; i < colors.length; i++) {
+            if (i % 6 == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                rlp.topMargin = dp(6);
+                c5.addView(row, rlp);
+            }
+            final int col = colors[i];
+            View sw = new View(this);
+            LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(0, dp(40), 1f);
+            slp.rightMargin = dp(6);
+            sw.setLayoutParams(slp);
+            sw.setOnClickListener(v -> { Prefs.setDialColor(this, col); paintSwatches(); });
+            swatches.add(sw);
+            swatchColors.add(col);
+            row.addView(sw);
+        }
+        paintSwatches();
         c5.addView(button("Escolher foto e mandar pro relógio", v -> {
             if (WatchLink.get(this).isSendingDial()) {
                 Toast.makeText(this, "Espera terminar o envio atual", Toast.LENGTH_SHORT).show();
@@ -152,6 +177,20 @@ public class MainActivity extends Activity {
 
     private static final int PICK_PHOTO = 7;
     private ImageView preview;
+    private final List<View> swatches = new ArrayList<>();
+    private final List<Integer> swatchColors = new ArrayList<>();
+
+    private void paintSwatches() {
+        int sel = Prefs.dialColor(this);
+        for (int i = 0; i < swatches.size(); i++) {
+            GradientDrawable d = new GradientDrawable();
+            d.setColor(swatchColors.get(i));
+            d.setCornerRadius(dp(8));
+            if (swatchColors.get(i) == sel) d.setStroke(dp(3), ACCENT);
+            else d.setStroke(dp(1), Color.DKGRAY);
+            swatches.get(i).setBackground(d);
+        }
+    }
 
     @Override
     protected void onActivityResult(int rc, int res, Intent data) {
@@ -164,7 +203,7 @@ public class MainActivity extends Activity {
                 Bitmap photo = loadScaled(uri, 1080);
                 if (photo == null) throw new Exception("não consegui abrir essa foto");
                 Bitmap shown = Dial.round(photo, Dial.SIZE);
-                byte[] file = Dial.build(photo, Color.WHITE);
+                byte[] file = Dial.build(photo, Prefs.dialColor(this));
                 photo.recycle();
                 h.post(() -> {
                     preview.setImageBitmap(shown);
