@@ -14,7 +14,12 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Matrix;
+import android.media.ExifInterface;
+import android.net.Uri;
 import android.graphics.Typeface;
 import android.os.Build;
 import android.os.Bundle;
@@ -26,6 +31,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
@@ -33,6 +39,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -120,8 +127,87 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Enviado", Toast.LENGTH_SHORT).show();
         }));
 
+        // 5. fundo da tela
+        LinearLayout c5 = card(root, "5. Fundo da tela do relógio");
+        c5.addView(text("Escolha uma foto. O centro dela vira o fundo redondo do relógio. Leva uns 20 segundos.", 14, Color.LTGRAY));
+        preview = new ImageView(this);
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(dp(160), dp(160));
+        plp.topMargin = dp(8);
+        plp.gravity = Gravity.CENTER_HORIZONTAL;
+        preview.setLayoutParams(plp);
+        preview.setVisibility(View.GONE);
+        c5.addView(preview);
+        c5.addView(button("Escolher foto e mandar pro relógio", v -> {
+            if (WatchLink.get(this).isSendingDial()) {
+                Toast.makeText(this, "Espera terminar o envio atual", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Intent pick = new Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(Intent.createChooser(pick, "Escolha a foto"), PICK_PHOTO);
+        }));
+
         setContentView(sv);
         askPermissions();
+    }
+
+    private static final int PICK_PHOTO = 7;
+    private ImageView preview;
+
+    @Override
+    protected void onActivityResult(int rc, int res, Intent data) {
+        super.onActivityResult(rc, res, data);
+        if (rc != PICK_PHOTO || res != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        statusTv.setText("Status: Preparando a foto…");
+        new Thread(() -> {
+            try {
+                Bitmap photo = loadScaled(uri, 1080);
+                if (photo == null) throw new Exception("não consegui abrir essa foto");
+                Bitmap shown = Dial.round(photo, Dial.SIZE);
+                byte[] file = Dial.build(photo, Color.WHITE);
+                photo.recycle();
+                h.post(() -> {
+                    preview.setImageBitmap(shown);
+                    preview.setVisibility(View.VISIBLE);
+                    String err = WatchLink.get(this).startDial(file);
+                    if (err != null) {
+                        statusTv.setText("Status: " + err);
+                        Toast.makeText(this, err, Toast.LENGTH_LONG).show();
+                    }
+                });
+            } catch (Exception e) {
+                h.post(() -> Toast.makeText(this, "Erro: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    }
+
+    /** Abre a foto ja reduzida (fotos de celular sao enormes). */
+    private Bitmap loadScaled(Uri uri, int max) throws Exception {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        try (InputStream in = getContentResolver().openInputStream(uri)) { BitmapFactory.decodeStream(in, null, o); }
+        int sample = 1;
+        while (Math.min(o.outWidth, o.outHeight) / (sample * 2) >= max) sample *= 2;
+        BitmapFactory.Options o2 = new BitmapFactory.Options();
+        o2.inSampleSize = sample;
+        Bitmap b;
+        try (InputStream in = getContentResolver().openInputStream(uri)) { b = BitmapFactory.decodeStream(in, null, o2); }
+        if (b == null) return null;
+        int rot = 0;
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            int or = new ExifInterface(in).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+            if (or == ExifInterface.ORIENTATION_ROTATE_90) rot = 90;
+            else if (or == ExifInterface.ORIENTATION_ROTATE_180) rot = 180;
+            else if (or == ExifInterface.ORIENTATION_ROTATE_270) rot = 270;
+        } catch (Exception ignored) {}
+        if (rot != 0) {
+            Matrix m = new Matrix();
+            m.postRotate(rot);
+            Bitmap r = Bitmap.createBitmap(b, 0, 0, b.getWidth(), b.getHeight(), m, true);
+            if (r != b) b.recycle();
+            b = r;
+        }
+        return b;
     }
 
     @Override

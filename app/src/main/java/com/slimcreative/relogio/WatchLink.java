@@ -43,6 +43,13 @@ public final class WatchLink {
     private String connectedMac;
     private int mtu = 23;
     private boolean writing;
+    private final ArrayDeque<byte[]> rawQueue = new ArrayDeque<>();
+
+    // troca de tela
+    private static final int DIAL_IDLE = 0, DIAL_WAIT_READY = 1, DIAL_SENDING = 2, DIAL_WAIT_END = 3;
+    private int dialState = DIAL_IDLE;
+    private byte[] dialFile;
+    private int dialIndex, dialChunks;
     private volatile String status = "Desconectado";
     private Listener listener;
 
@@ -88,9 +95,40 @@ public final class WatchLink {
         connectedMac = null;
         writing = false;
         mtu = 23;
+        dialState = DIAL_IDLE;
+        dialFile = null;
+        rawQueue.clear();
     }
 
     public synchronized boolean isReady() { return writeChar != null; }
+
+    public synchronized boolean isSendingDial() { return dialState != DIAL_IDLE; }
+
+    /** Manda um arquivo de fundo de tela (montado pelo Dial) pro relogio. */
+    public synchronized String startDial(byte[] file) {
+        if (writeChar == null || gatt == null) return "O relógio não está conectado";
+        if (dialState != DIAL_IDLE) return "Já tem uma imagem sendo enviada";
+        if (mtu < 4 + 2 + Packet.DIAL_CHUNK + 1 + 3) return "A conexão Bluetooth não aceitou pacotes grandes (MTU " + mtu + "). Desliga e liga o Bluetooth e tenta de novo";
+        dialFile = file;
+        dialChunks = (file.length + Packet.DIAL_CHUNK - 1) / Packet.DIAL_CHUNK;
+        dialIndex = 0;
+        dialState = DIAL_WAIT_READY;
+        rawQueue.add(Packet.dialStart(file.length, dialChunks));
+        setStatus("Preparando o relógio…");
+        final byte[] mine = file;
+        main.postDelayed(() -> dialTimeout(mine, DIAL_WAIT_READY, "O relógio não respondeu ao pedido de troca de tela"), 45000);
+        pump();
+        return null;
+    }
+
+    private synchronized void dialTimeout(byte[] file, int state, String msg) {
+        if (dialFile == file && dialState == state) {
+            dialState = DIAL_IDLE;
+            dialFile = null;
+            setStatus(msg);
+            pump();
+        }
+    }
 
     /** Coloca uma notificacao na fila de envio. */
     public synchronized void sendNotification(int app, String title, String body) {
@@ -110,16 +148,70 @@ public final class WatchLink {
     }
 
     private synchronized void pump() {
-        if (writing || writeChar == null || gatt == null || queue.isEmpty()) return;
-        String[] n = queue.poll();
-        byte[] pkt = Packet.notification(Integer.parseInt(n[0]), n[1], n[2], mtu - 3 - 5);
-        lastPkt = n;
+        if (writing || writeChar == null || gatt == null) return;
+        byte[] pkt;
+        boolean chunk = false;
+        if (!rawQueue.isEmpty()) {
+            pkt = rawQueue.peek();
+            lastPkt = null;
+        } else if (dialState == DIAL_SENDING) {
+            pkt = Packet.dialChunk(dialFile, dialIndex);
+            chunk = true;
+            lastPkt = null;
+        } else if (dialState == DIAL_IDLE && !queue.isEmpty()) {
+            String[] n = queue.poll();
+            pkt = Packet.notification(Integer.parseInt(n[0]), n[1], n[2], mtu - 3 - 5);
+            lastPkt = n;
+        } else {
+            return;
+        }
         writeChar.setWriteType(noResponse ? BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
                 : BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
         writeChar.setValue(pkt);
         writing = gatt.writeCharacteristic(writeChar);
-        Log.i(TAG, "envio " + Packet.hex(pkt) + " ok=" + writing);
-        if (!writing) main.postDelayed(this::pump, 500);
+        if (writing) {
+            if (chunk) {
+                dialIndex++;
+                if (dialIndex % 40 == 0 || dialIndex == dialChunks)
+                    setStatus("Enviando a imagem… " + (dialIndex * 100 / dialChunks) + "%");
+                if (dialIndex >= dialChunks) {
+                    dialState = DIAL_WAIT_END;
+                    final byte[] mine = dialFile;
+                    main.postDelayed(() -> dialTimeout(mine, DIAL_WAIT_END, "O relógio não confirmou a imagem"), 20000);
+                }
+            } else if (lastPkt == null) {
+                rawQueue.poll();
+            }
+            if (!chunk) Log.i(TAG, "envio " + Packet.hex(pkt));
+        } else {
+            if (lastPkt != null) queue.addFirst(lastPkt);
+            main.postDelayed(this::pump, chunk ? 20 : 500);
+        }
+    }
+
+    /** Respostas do relogio: BC [cmd] 03 [len] [dados] [soma]. */
+    private synchronized void onWatchData(byte[] v) {
+        if (v == null || v.length < 5 || (v[0] & 0xFF) != 0xBC || v[2] != 0x03) return;
+        int cmd = v[1] & 0xFF;
+        if (cmd == 0x72 && dialState == DIAL_WAIT_READY) {
+            setStatus("Preparando o relógio… " + (v[4] & 0xFF));
+        } else if (cmd == 0xC8 && dialState == DIAL_WAIT_READY) {
+            dialState = DIAL_SENDING;
+            dialIndex = 0;
+            setStatus("Enviando a imagem… 0%");
+            pump();
+        } else if (cmd == 0xCA && dialState == DIAL_WAIT_END) {
+            int result = v[4] & 0xFF;
+            dialState = DIAL_IDLE;
+            dialFile = null;
+            if (result == 0) {
+                rawQueue.add(Packet.dialEnd());
+                setStatus("Fundo da tela trocado ✔");
+            } else {
+                setStatus("O relógio recusou a imagem (código " + result + ")");
+            }
+            pump();
+        }
     }
 
     private final BluetoothGattCallback callback = new BluetoothGattCallback() {
@@ -129,8 +221,14 @@ public final class WatchLink {
                 setStatus("Conectado, preparando…");
                 if (!g.requestMtu(247)) g.discoverServices();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                synchronized (WatchLink.this) { writeChar = null; writing = false; mtu = 23; }
-                setStatus("Relógio fora de alcance (reconecta sozinho)");
+                boolean wasDial;
+                synchronized (WatchLink.this) {
+                    writeChar = null; writing = false; mtu = 23;
+                    wasDial = dialState != DIAL_IDLE;
+                    dialState = DIAL_IDLE; dialFile = null; rawQueue.clear();
+                }
+                setStatus(wasDial ? "A conexão caiu no meio do envio da imagem. Tenta de novo"
+                        : "Relógio fora de alcance (reconecta sozinho)");
                 if (st != BluetoothGatt.GATT_SUCCESS && g == gatt) {
                     // erro de conexao: fecha e tenta de novo daqui a pouco
                     synchronized (WatchLink.this) { disconnect(); }
@@ -189,6 +287,7 @@ public final class WatchLink {
             byte[] v = c.getValue();
             Log.i(TAG, "relogio -> " + (v == null ? "" : Packet.hex(v)));
             gotReply = true;
+            onWatchData(v);
         }
 
         @Override
@@ -201,8 +300,10 @@ public final class WatchLink {
                 return;
             }
             retried = false;
+            boolean dial;
+            synchronized (WatchLink.this) { dial = dialState != DIAL_IDLE; }
             if (st != BluetoothGatt.GATT_SUCCESS) setStatus("Falha no envio (código " + st + ")");
-            else setStatus("Enviado pro relógio ✔" + (gotReply ? "" : " (relógio ainda não respondeu)"));
+            else if (!dial && lastPkt != null) setStatus("Enviado pro relógio ✔");
             pump();
         }
     };

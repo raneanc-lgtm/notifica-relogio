@@ -49,6 +49,43 @@ public final class Packet {
         return out;
     }
 
+    /** Quadro generico do celular pro relogio: BC [cmd] 02 [len] [dados] [soma dos dados]. */
+    public static byte[] frame(int cmd, byte[] payload) {
+        byte[] out = new byte[4 + payload.length + 1];
+        out[0] = (byte) 0xBC;
+        out[1] = (byte) cmd;
+        out[2] = 0x02;
+        out[3] = (byte) payload.length;
+        System.arraycopy(payload, 0, out, 4, payload.length);
+        int sum = 0;
+        for (byte b : payload) sum += b & 0xFF;
+        out[out.length - 1] = (byte) sum;
+        return out;
+    }
+
+    /** Inicio da troca de tela: BC C8 02 07 | 01 [tamanho u32] [qtd pedacos u16] | soma. */
+    public static byte[] dialStart(int size, int chunks) {
+        return frame(0xC8, new byte[]{1,
+                (byte) size, (byte) (size >> 8), (byte) (size >> 16), (byte) (size >> 24),
+                (byte) chunks, (byte) (chunks >> 8)});
+    }
+
+    /** Pedaco da imagem: BC C9 02 [len] | [numero u16] [ate 230 bytes] | soma. */
+    public static byte[] dialChunk(byte[] file, int index) {
+        int off = index * DIAL_CHUNK;
+        int n = Math.min(DIAL_CHUNK, file.length - off);
+        byte[] p = new byte[2 + n];
+        p[0] = (byte) index;
+        p[1] = (byte) (index >> 8);
+        System.arraycopy(file, off, p, 2, n);
+        return frame(0xC9, p);
+    }
+
+    /** Fim da troca de tela, mandado depois que o relogio confirma: BC CA 02 01 05 05. */
+    public static byte[] dialEnd() { return frame(0xCA, new byte[]{5}); }
+
+    public static final int DIAL_CHUNK = 230;
+
     /** Corta sem quebrar um caractere UTF-8 no meio. */
     static byte[] cut(byte[] src, int max) {
         if (src.length <= max) return src;
