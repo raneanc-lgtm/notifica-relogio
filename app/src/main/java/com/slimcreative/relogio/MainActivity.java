@@ -1,0 +1,294 @@
+package com.slimcreative.relogio;
+
+import android.Manifest;
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
+import android.content.ComponentName;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
+import android.text.TextUtils;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+@SuppressLint({"MissingPermission", "SetTextI18n"})
+public class MainActivity extends Activity {
+    private static final int BG = Color.parseColor("#121212");
+    private static final int CARD = Color.parseColor("#1E1E1E");
+    private static final int ACCENT = Color.parseColor("#25D366");
+
+    private final Handler h = new Handler(Looper.getMainLooper());
+    private TextView statusTv, notifTv, watchTv;
+    private LinearLayout scanList, appsBox;
+    private Button scanBtn;
+    private boolean scanning;
+    private final Map<String, String> found = new LinkedHashMap<>();
+
+    @Override
+    protected void onCreate(Bundle b) {
+        super.onCreate(b);
+        ScrollView sv = new ScrollView(this);
+        sv.setBackgroundColor(BG);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int pad = dp(16);
+        root.setPadding(pad, pad, pad, pad);
+        sv.addView(root);
+
+        TextView title = text("Notifica Relógio", 24, Color.WHITE);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        root.addView(title);
+        statusTv = text("", 15, ACCENT);
+        statusTv.setPadding(0, dp(4), 0, dp(12));
+        root.addView(statusTv);
+
+        // 1. acesso as notificacoes
+        LinearLayout c1 = card(root, "1. Acesso às notificações");
+        notifTv = text("", 14, Color.LTGRAY);
+        c1.addView(notifTv);
+        c1.addView(button("Abrir configuração", v ->
+                startActivity(new Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS"))));
+
+        // 2. relogio
+        LinearLayout c2 = card(root, "2. Relógio");
+        watchTv = text("", 14, Color.LTGRAY);
+        c2.addView(watchTv);
+        scanBtn = button("Procurar relógio", v -> startScan());
+        c2.addView(scanBtn);
+        scanList = new LinearLayout(this);
+        scanList.setOrientation(LinearLayout.VERTICAL);
+        c2.addView(scanList);
+
+        // 3. apps
+        LinearLayout c3 = card(root, "3. Apps que vibram no relógio");
+        appsBox = new LinearLayout(this);
+        appsBox.setOrientation(LinearLayout.VERTICAL);
+        c3.addView(appsBox);
+        Button showApps = button("Escolher apps", null);
+        showApps.setOnClickListener(v -> { loadApps(); showApps.setVisibility(View.GONE); });
+        c3.addView(showApps);
+
+        // 4. teste
+        LinearLayout c4 = card(root, "4. Teste");
+        c4.addView(button("Mandar teste pro relógio", v -> {
+            WatchLink.get(this).sendNotification(Packet.APP_WHATSAPP, "Teste", "Funcionou!");
+            Toast.makeText(this, "Enviado", Toast.LENGTH_SHORT).show();
+        }));
+
+        setContentView(sv);
+        askPermissions();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        boolean ok = notifAccess();
+        notifTv.setText(ok ? "Liberado ✔" : "Ainda não liberado: toque abaixo e ative \"Notifica Relógio\"");
+        notifTv.setTextColor(ok ? ACCENT : Color.parseColor("#FF8A65"));
+        String n = Prefs.name(this), mac = Prefs.mac(this);
+        watchTv.setText(mac == null ? "Nenhum escolhido" : "Escolhido: " + (n == null ? "?" : n) + " (" + mac + ")");
+        WatchLink link = WatchLink.get(this);
+        link.setListener(s -> statusTv.setText("Status: " + s));
+        if (hasBtPerms()) link.ensureConnected();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        WatchLink.get(this).setListener(null);
+        stopScan();
+    }
+
+    private boolean notifAccess() {
+        String flat = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
+        ComponentName me = new ComponentName(this, NotifService.class);
+        return flat != null && flat.contains(me.flattenToString());
+    }
+
+    // ---------- permissoes ----------
+    private String[] btPerms() {
+        if (Build.VERSION.SDK_INT >= 31)
+            return new String[]{"android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_CONNECT"};
+        return new String[]{Manifest.permission.ACCESS_FINE_LOCATION};
+    }
+
+    private boolean hasBtPerms() {
+        for (String p : btPerms())
+            if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) return false;
+        return true;
+    }
+
+    private void askPermissions() {
+        if (!hasBtPerms()) requestPermissions(btPerms(), 1);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int rc, String[] p, int[] r) {
+        if (hasBtPerms()) WatchLink.get(this).ensureConnected();
+        else Toast.makeText(this, "Sem a permissão de Bluetooth o app não consegue falar com o relógio", Toast.LENGTH_LONG).show();
+    }
+
+    // ---------- busca do relogio ----------
+    private final ScanCallback scanCb = new ScanCallback() {
+        @Override
+        public void onScanResult(int type, ScanResult r) {
+            BluetoothDevice d = r.getDevice();
+            String name = r.getScanRecord() != null ? r.getScanRecord().getDeviceName() : null;
+            if (name == null) name = d.getName();
+            if (TextUtils.isEmpty(name) || found.containsKey(d.getAddress())) return;
+            found.put(d.getAddress(), name);
+            addFound(d.getAddress(), name);
+        }
+    };
+
+    private void startScan() {
+        if (!hasBtPerms()) { askPermissions(); return; }
+        BluetoothManager bm = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
+        BluetoothAdapter ad = bm.getAdapter();
+        if (ad == null || !ad.isEnabled()) {
+            Toast.makeText(this, "Liga o Bluetooth primeiro", Toast.LENGTH_LONG).show();
+            return;
+        }
+        BluetoothLeScanner sc = ad.getBluetoothLeScanner();
+        if (sc == null || scanning) return;
+        found.clear();
+        scanList.removeAllViews();
+        scanList.addView(text("Procurando… (deixa o relógio perto e com a tela acesa)", 13, Color.GRAY));
+        scanning = true;
+        scanBtn.setEnabled(false);
+        sc.startScan(null, new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), scanCb);
+        h.postDelayed(this::stopScan, 12000);
+    }
+
+    private void stopScan() {
+        if (!scanning) return;
+        scanning = false;
+        scanBtn.setEnabled(true);
+        try {
+            BluetoothManager bm = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
+            BluetoothLeScanner sc = bm.getAdapter().getBluetoothLeScanner();
+            if (sc != null) sc.stopScan(scanCb);
+        } catch (Exception ignored) {}
+        if (scanList.getChildCount() == 1 && found.isEmpty()) {
+            scanList.removeAllViews();
+            scanList.addView(text("Não achei nada. Se o MActivePro ainda estiver conectado no relógio, desinstala ele e tenta de novo.", 13, Color.parseColor("#FF8A65")));
+        }
+    }
+
+    private void addFound(String mac, String name) {
+        if (scanList.getChildCount() == 1 && scanList.getChildAt(0) instanceof TextView
+                && !(scanList.getChildAt(0) instanceof Button)) scanList.removeAllViews();
+        boolean likely = name.toLowerCase().contains("watch");
+        Button b = button((likely ? "⌚ " : "") + name + "  •  " + mac, v -> {
+            Prefs.setWatch(this, mac, name);
+            stopScan();
+            scanList.removeAllViews();
+            watchTv.setText("Escolhido: " + name + " (" + mac + ")");
+            WatchLink.get(this).disconnect();
+            WatchLink.get(this).ensureConnected();
+        });
+        if (likely) scanList.addView(b, 0); else scanList.addView(b);
+    }
+
+    // ---------- lista de apps ----------
+    private void loadApps() {
+        PackageManager pm = getPackageManager();
+        Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> list = pm.queryIntentActivities(i, 0);
+        Map<String, String> apps = new LinkedHashMap<>();
+        for (ResolveInfo ri : list) {
+            String pkg = ri.activityInfo.packageName;
+            if (pkg.equals(getPackageName())) continue;
+            apps.put(pkg, String.valueOf(ri.loadLabel(pm)));
+        }
+        List<Map.Entry<String, String>> sorted = new ArrayList<>(apps.entrySet());
+        Set<String> sel = Prefs.apps(this);
+        Collections.sort(sorted, (a, b) -> {
+            boolean sa = sel.contains(a.getKey()), sb = sel.contains(b.getKey());
+            if (sa != sb) return sa ? -1 : 1;
+            return a.getValue().compareToIgnoreCase(b.getValue());
+        });
+        appsBox.removeAllViews();
+        for (Map.Entry<String, String> e : sorted) {
+            CheckBox cb = new CheckBox(this);
+            cb.setText(e.getValue());
+            cb.setTextColor(Color.WHITE);
+            cb.setChecked(sel.contains(e.getKey()));
+            cb.setOnCheckedChangeListener((v, on) -> {
+                Set<String> s = new HashSet<>(Prefs.apps(this));
+                if (on) s.add(e.getKey()); else s.remove(e.getKey());
+                Prefs.setApps(this, s);
+            });
+            appsBox.addView(cb);
+        }
+    }
+
+    // ---------- helpers de tela ----------
+    private int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density); }
+
+    private TextView text(String s, int sp, int color) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(sp);
+        t.setTextColor(color);
+        return t;
+    }
+
+    private Button button(String s, View.OnClickListener l) {
+        Button b = new Button(this);
+        b.setText(s);
+        b.setAllCaps(false);
+        b.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        if (l != null) b.setOnClickListener(l);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(6);
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    private LinearLayout card(LinearLayout root, String title) {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setBackgroundColor(CARD);
+        int p = dp(14);
+        c.setPadding(p, p, p, p);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(12);
+        root.addView(c, lp);
+        TextView t = text(title, 17, Color.WHITE);
+        t.setTypeface(Typeface.DEFAULT_BOLD);
+        t.setPadding(0, 0, 0, dp(6));
+        c.addView(t);
+        return c;
+    }
+}

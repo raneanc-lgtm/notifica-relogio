@@ -1,0 +1,32 @@
+plugins { id "com.android.application" }
+
+android {
+    namespace "com.slimcreative.relogio"
+    compileSdk 34
+    defaultConfig {
+        applicationId "com.slimcreative.relogio"
+        minSdk 26
+        targetSdk 34
+        versionCode 2
+        versionName "1.1"
+    }
+    signingConfigs {
+        release {
+            storeFile file("release.jks")
+            storePassword "slimcreative"
+            keyAlias "slim"
+            keyPassword "slimcreative"
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    lint { abortOnError false; checkReleaseBuilds false }
+}
