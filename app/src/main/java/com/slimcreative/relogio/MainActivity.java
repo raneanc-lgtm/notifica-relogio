@@ -3,6 +3,7 @@ package com.slimcreative.relogio;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
@@ -31,9 +32,9 @@ import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
@@ -57,7 +58,8 @@ public class MainActivity extends Activity {
 
     private final Handler h = new Handler(Looper.getMainLooper());
     private TextView statusTv, notifTv, watchTv;
-    private LinearLayout scanList, appsBox;
+    private LinearLayout scanList;
+    private TextView appsTv;
     private Button scanBtn;
     private boolean scanning;
     private final Map<String, String> found = new LinkedHashMap<>();
@@ -99,12 +101,9 @@ public class MainActivity extends Activity {
 
         // 3. apps
         LinearLayout c3 = card(root, "3. Apps que vibram no relógio");
-        appsBox = new LinearLayout(this);
-        appsBox.setOrientation(LinearLayout.VERTICAL);
-        c3.addView(appsBox);
-        Button showApps = button("Escolher apps", null);
-        showApps.setOnClickListener(v -> { loadApps(); showApps.setVisibility(View.GONE); });
-        c3.addView(showApps);
+        appsTv = text("", 14, Color.LTGRAY);
+        c3.addView(appsTv);
+        c3.addView(button("Escolher apps", v -> showAppsDialog()));
 
         // 4. vibracao e teste
         LinearLayout c4 = card(root, "4. Vibração e teste");
@@ -123,6 +122,10 @@ public class MainActivity extends Activity {
         rg.check(1000 + Prefs.vibes(this));
         rg.setOnCheckedChangeListener((g, id) -> Prefs.setVibes(this, id - 1000));
         c4.addView(rg);
+        c4.addView(button("Encontrar relógio", v -> {
+            if (!WatchLink.get(this).findWatch())
+                Toast.makeText(this, "O relógio não está conectado", Toast.LENGTH_SHORT).show();
+        }));
         c4.addView(button("Mandar teste pro relógio", v -> {
             WatchLink.get(this).sendNotification(Packet.APP_WHATSAPP, "Teste", "Funcionou!");
             Toast.makeText(this, "Enviado", Toast.LENGTH_SHORT).show();
@@ -252,6 +255,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        updateAppsText();
         boolean ok = notifAccess();
         notifTv.setText(ok ? "Liberado ✔" : "Ainda não liberado: toque abaixo e ative \"Notifica Relógio\"");
         notifTv.setTextColor(ok ? ACCENT : Color.parseColor("#FF8A65"));
@@ -361,35 +365,56 @@ public class MainActivity extends Activity {
     }
 
     // ---------- lista de apps ----------
-    private void loadApps() {
+    private void updateAppsText() {
+        int n = Prefs.apps(this).size();
+        appsTv.setText(n == 0 ? "Nenhum app escolhido" : n == 1 ? "1 app escolhido" : n + " apps escolhidos");
+    }
+
+    private void showAppsDialog() {
         PackageManager pm = getPackageManager();
         Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-        List<ResolveInfo> list = pm.queryIntentActivities(i, 0);
         Map<String, String> apps = new LinkedHashMap<>();
-        for (ResolveInfo ri : list) {
+        for (ResolveInfo ri : pm.queryIntentActivities(i, 0)) {
             String pkg = ri.activityInfo.packageName;
-            if (pkg.equals(getPackageName())) continue;
-            apps.put(pkg, String.valueOf(ri.loadLabel(pm)));
+            if (!pkg.equals(getPackageName())) apps.put(pkg, String.valueOf(ri.loadLabel(pm)));
         }
+        Set<String> sel = new HashSet<>(Prefs.apps(this));
         List<Map.Entry<String, String>> sorted = new ArrayList<>(apps.entrySet());
-        Set<String> sel = Prefs.apps(this);
         Collections.sort(sorted, (a, b) -> {
             boolean sa = sel.contains(a.getKey()), sb = sel.contains(b.getKey());
             if (sa != sb) return sa ? -1 : 1;
             return a.getValue().compareToIgnoreCase(b.getValue());
         });
-        appsBox.removeAllViews();
-        for (Map.Entry<String, String> e : sorted) {
-            CheckBox cb = new CheckBox(this);
-            cb.setText(e.getValue());
-            cb.setTextColor(Color.WHITE);
-            cb.setChecked(sel.contains(e.getKey()));
-            cb.setOnCheckedChangeListener((v, on) -> {
-                Set<String> s = new HashSet<>(Prefs.apps(this));
-                if (on) s.add(e.getKey()); else s.remove(e.getKey());
-                Prefs.setApps(this, s);
-            });
-            appsBox.addView(cb);
+        String[] names = new String[sorted.size()];
+        boolean[] checked = new boolean[sorted.size()];
+        for (int k = 0; k < sorted.size(); k++) {
+            names[k] = sorted.get(k).getValue();
+            checked[k] = sel.contains(sorted.get(k).getKey());
+        }
+        AlertDialog dlg = new AlertDialog.Builder(this)
+                .setTitle("Apps que vibram no relógio")
+                .setMultiChoiceItems(names, checked, (d, which, on) -> checked[which] = on)
+                .setPositiveButton("Pronto", (d, w) -> {
+                    Set<String> out = new HashSet<>();
+                    for (int k = 0; k < checked.length; k++) if (checked[k]) out.add(sorted.get(k).getKey());
+                    Prefs.setApps(this, out);
+                    updateAppsText();
+                })
+                .setNeutralButton("Todos", null)
+                .setNegativeButton("Nenhum", null)
+                .create();
+        dlg.setOnShowListener(d -> {
+            dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> setAll(dlg, checked, true));
+            dlg.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> setAll(dlg, checked, false));
+        });
+        dlg.show();
+    }
+
+    private void setAll(AlertDialog dlg, boolean[] checked, boolean on) {
+        ListView lv = dlg.getListView();
+        for (int k = 0; k < checked.length; k++) {
+            checked[k] = on;
+            lv.setItemChecked(k, on);
         }
     }
 

@@ -86,6 +86,15 @@ public final class Packet {
 
     public static final int DIAL_CHUNK = 230;
 
+    /** Acerta a hora: BC 43 02 04 [hora local em segundos, u32]. Capturado: 20:30:06 -> 4EE7EC6A. */
+    public static byte[] timeSync(long utcMillis, int tzOffsetMillis) {
+        long t = (utcMillis + tzOffsetMillis) / 1000L;
+        return frame(0x43, new byte[]{(byte) t, (byte) (t >> 8), (byte) (t >> 16), (byte) (t >> 24)});
+    }
+
+    /** Encontrar relogio: BC 00 02 01 00 00. */
+    public static byte[] findWatch() { return frame(0x00, new byte[]{0}); }
+
     /** Corta sem quebrar um caractere UTF-8 no meio. */
     static byte[] cut(byte[] src, int max) {
         if (src.length <= max) return src;

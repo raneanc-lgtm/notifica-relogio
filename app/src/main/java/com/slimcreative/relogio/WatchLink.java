@@ -338,7 +338,19 @@ public final class WatchLink {
             pendingWriteChar = null;
             writing = false;
         }
+        synchronized (this) {
+            long now = System.currentTimeMillis();
+            rawQueue.add(Packet.timeSync(now, java.util.TimeZone.getDefault().getOffset(now)));
+        }
         setStatus("Conectado ✔");
         pump();
+    }
+
+    /** Faz o relogio vibrar/tocar pra achar ele. */
+    public synchronized boolean findWatch() {
+        if (writeChar == null || gatt == null) return false;
+        rawQueue.add(Packet.findWatch());
+        pump();
+        return true;
     }
 }
