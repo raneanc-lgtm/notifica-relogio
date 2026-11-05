@@ -104,7 +104,9 @@ public final class WatchLink {
         if (writing || writeChar == null || gatt == null || queue.isEmpty()) return;
         String[] n = queue.poll();
         byte[] pkt = Packet.notification(Integer.parseInt(n[0]), n[1], n[2], mtu - 3 - 5);
-        writeChar.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+        lastPkt = n;
+        writeChar.setWriteType(noResponse ? BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                : BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
         writeChar.setValue(pkt);
         writing = gatt.writeCharacteristic(writeChar);
         Log.i(TAG, "envio " + Packet.hex(pkt) + " ok=" + writing);
@@ -140,6 +142,10 @@ public final class WatchLink {
             BluetoothGattCharacteristic c = s == null ? null : s.getCharacteristic(WRITE_CHAR);
             if (c == null) { setStatus("Esse aparelho não parece ser o relógio certo"); return; }
             // Liga os canais de resposta do relogio (o MActivePro faz isso ao conectar).
+            int wp = c.getProperties();
+            noResponse = (wp & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0
+                    || (wp & BluetoothGattCharacteristic.PROPERTY_WRITE) == 0;
+            Log.i(TAG, "ff02 propriedades=0x" + Integer.toHexString(wp));
             synchronized (WatchLink.this) {
                 pendingCccd.clear();
                 for (BluetoothGattService sv : g.getServices()) {
@@ -179,6 +185,13 @@ public final class WatchLink {
         @Override
         public void onCharacteristicWrite(BluetoothGatt g, BluetoothGattCharacteristic c, int st) {
             synchronized (WatchLink.this) { writing = false; }
+            if (st == BluetoothGatt.GATT_WRITE_NOT_PERMITTED && !retried && lastPkt != null) {
+                // o canal nao aceitou esse tipo de escrita: troca o tipo e reenvia
+                synchronized (WatchLink.this) { noResponse = !noResponse; retried = true; queue.addFirst(lastPkt); }
+                pump();
+                return;
+            }
+            retried = false;
             if (st != BluetoothGatt.GATT_SUCCESS) setStatus("Falha no envio (código " + st + ")");
             else setStatus("Enviado pro relógio ✔" + (gotReply ? "" : " (relógio ainda não respondeu)"));
             pump();
@@ -189,6 +202,9 @@ public final class WatchLink {
     private BluetoothGattCharacteristic pendingWriteChar;
     private volatile boolean gotReply;
     private int cccdTries;
+    private boolean noResponse;
+    private boolean retried;
+    private String[] lastPkt;
 
     private void nextCccd(BluetoothGatt g) {
         BluetoothGattDescriptor d;
