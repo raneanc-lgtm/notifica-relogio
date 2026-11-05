@@ -94,6 +94,15 @@ public final class WatchLink {
 
     /** Coloca uma notificacao na fila de envio. */
     public synchronized void sendNotification(int app, String title, String body) {
+        int times = Prefs.vibes(ctx);
+        for (int i = 1; i < times; i++) {
+            // repete o aviso pra vibrar mais vezes (o relogio nao deixa vibrar mais forte)
+            main.postDelayed(() -> enqueue(app, title, body), 700L * i);
+        }
+        enqueue(app, title, body);
+    }
+
+    private synchronized void enqueue(int app, String title, String body) {
         queue.add(new String[]{String.valueOf(app), title, body});
         while (queue.size() > 10) queue.poll();
         ensureConnected();

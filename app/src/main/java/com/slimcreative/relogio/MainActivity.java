@@ -27,6 +27,8 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -96,8 +98,23 @@ public class MainActivity extends Activity {
         showApps.setOnClickListener(v -> { loadApps(); showApps.setVisibility(View.GONE); });
         c3.addView(showApps);
 
-        // 4. teste
-        LinearLayout c4 = card(root, "4. Teste");
+        // 4. vibracao e teste
+        LinearLayout c4 = card(root, "4. Vibração e teste");
+        c4.addView(text("Vibrações por mensagem", 14, Color.LTGRAY));
+        RadioGroup rg = new RadioGroup(this);
+        rg.setOrientation(RadioGroup.HORIZONTAL);
+        for (int i = 1; i <= 3; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setId(1000 + i);
+            rb.setText(i + "x");
+            rb.setTextColor(Color.WHITE);
+            rb.setTextSize(16);
+            rb.setPadding(0, 0, dp(24), 0);
+            rg.addView(rb);
+        }
+        rg.check(1000 + Prefs.vibes(this));
+        rg.setOnCheckedChangeListener((g, id) -> Prefs.setVibes(this, id - 1000));
+        c4.addView(rg);
         c4.addView(button("Mandar teste pro relógio", v -> {
             WatchLink.get(this).sendNotification(Packet.APP_WHATSAPP, "Teste", "Funcionou!");
             Toast.makeText(this, "Enviado", Toast.LENGTH_SHORT).show();

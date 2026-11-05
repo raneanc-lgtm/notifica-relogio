@@ -29,6 +29,11 @@ public final class Prefs {
         return new HashSet<>(sp(c).getStringSet("apps", def));
     }
 
+    /** Quantas vezes o relogio vibra por mensagem (1 a 3). */
+    public static int vibes(Context c) { return Math.max(1, Math.min(3, sp(c).getInt("vibes", 2))); }
+
+    public static void setVibes(Context c, int n) { sp(c).edit().putInt("vibes", n).apply(); }
+
     public static void setApps(Context c, Set<String> apps) {
         sp(c).edit().putStringSet("apps", new HashSet<>(apps)).apply();
     }
