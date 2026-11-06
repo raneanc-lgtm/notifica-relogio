@@ -44,6 +44,30 @@ public final class Prefs {
 
     public static void setDialPosition(Context c, int pos) { sp(c).edit().putInt("dialPos", pos).apply(); }
 
+    /** 4 alarmes: {ligado, hora, min, dias} ou null. Guardado como texto "l,h,m,d;...". */
+    public static int[][] alarms(Context c) {
+        String raw = sp(c).getString("alarms", "");
+        int[][] out = new int[4][];
+        String[] parts = raw.split(";", -1);
+        for (int i = 0; i < 4 && i < parts.length; i++) {
+            String[] f = parts[i].split(",");
+            if (f.length != 4) continue;
+            try {
+                out[i] = new int[]{Integer.parseInt(f[0]), Integer.parseInt(f[1]), Integer.parseInt(f[2]), Integer.parseInt(f[3])};
+            } catch (NumberFormatException ignored) {}
+        }
+        return out;
+    }
+
+    public static void setAlarms(Context c, int[][] a) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 4; i++) {
+            if (i > 0) sb.append(';');
+            if (a[i] != null) sb.append(a[i][0]).append(',').append(a[i][1]).append(',').append(a[i][2]).append(',').append(a[i][3]);
+        }
+        sp(c).edit().putString("alarms", sb.toString()).apply();
+    }
+
     public static void setApps(Context c, Set<String> apps) {
         sp(c).edit().putStringSet("apps", new HashSet<>(apps)).apply();
     }

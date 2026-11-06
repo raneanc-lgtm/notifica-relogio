@@ -95,6 +95,63 @@ public final class Packet {
     /** Encontrar relogio: BC 00 02 01 00 00. */
     public static byte[] findWatch() { return frame(0x00, new byte[]{0}); }
 
+    /** "To vivo" que o MActivePro manda a cada ~1 min; sem ele o relogio pode derrubar a conexao. */
+    public static byte[] heartbeat() {
+        return new byte[]{(byte) 0xAA, 0x21, 0x00, 0x00, (byte) 0xF0, (byte) 0xF0, (byte) 0xF0, (byte) 0xF0};
+    }
+
+    /** Quadro com tipo de controle escolhido (01 = leitura). */
+    public static byte[] frameCtrl(int cmd, int ctrl, byte[] payload) {
+        byte[] f = frame(cmd, payload);
+        f[2] = (byte) ctrl;
+        return f;
+    }
+
+    /** Dias do alarme (SDK AlarmCycleImpl): seg 0x40, ter 0x20, qua 0x10, qui 0x08, sex 0x04, sab 0x02, dom 0x01. */
+    public static final int[] ALARM_DAY_BITS = {0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01}; // seg..dom
+
+    /**
+     * Grava os 4 alarmes (SDK setAlarmClock): BC 5A 02 15 FF + 4 x [ligado][tipo][dias][hora][min].
+     * tipo 1 = uma vez (dias 0), 3 = dias escolhidos. alarms[i] = {ligado(0/1), hora, min, dias}; null = vazio.
+     */
+    public static byte[] alarms(int[][] alarms) {
+        byte[] p = new byte[21];
+        p[0] = (byte) 0xFF;
+        for (int i = 0; i < 4; i++) {
+            int[] a = i < alarms.length ? alarms[i] : null;
+            if (a == null) continue;
+            int o = 1 + i * 5;
+            p[o] = (byte) (a[0] != 0 ? 1 : 0);
+            p[o + 1] = (byte) (a[3] == 0 ? 1 : 3);
+            p[o + 2] = (byte) a[3];
+            p[o + 3] = (byte) a[1];
+            p[o + 4] = (byte) a[2];
+        }
+        return frame(0x5A, p);
+    }
+
+    /** Pede os alarmes gravados no relogio: BC 5A 01 01 FF FF. */
+    public static byte[] alarmsRead() { return frameCtrl(0x5A, 0x01, new byte[]{(byte) 0xFF}); }
+
+    /** Musica (SDK sendMusicName): BC 65 02 [len] 04 "nome". */
+    public static byte[] musicName(String name) {
+        byte[] n = cut((name == null ? "" : name).getBytes(StandardCharsets.UTF_8), 120);
+        byte[] p = new byte[1 + n.length];
+        p[0] = 4;
+        System.arraycopy(n, 0, p, 1, n.length);
+        return frame(0x65, p);
+    }
+
+    /** Volume (SDK sendMusicVolume): BC 65 02 03 02 [volume] [maximo]. Capturado: 02 09 0F. */
+    public static byte[] musicVolume(int volume, int max) {
+        return frame(0x65, new byte[]{2, (byte) volume, (byte) max});
+    }
+
+    /** Troca o nome Bluetooth do relogio (SDK modifyBtName, comando 58, ate 23 bytes). */
+    public static byte[] btName(String name) {
+        return frame(0x3A, cut(name.getBytes(StandardCharsets.UTF_8), 23));
+    }
+
     /** Corta sem quebrar um caractere UTF-8 no meio. */
     static byte[] cut(byte[] src, int max) {
         if (src.length <= max) return src;

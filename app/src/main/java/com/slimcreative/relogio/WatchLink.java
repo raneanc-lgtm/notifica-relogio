@@ -220,8 +220,29 @@ public final class WatchLink {
 
     /** Respostas do relogio: BC [cmd] 03 [len] [dados] [soma]. */
     private synchronized void onWatchData(byte[] v) {
-        if (v == null || v.length < 5 || (v[0] & 0xFF) != 0xBC || v[2] != 0x03) return;
+        if (v == null || v.length < 5 || (v[0] & 0xFF) != 0xBC) return;
         int cmd = v[1] & 0xFF;
+        int len = v[3] & 0xFF;
+        byte[] payload = new byte[Math.min(len, v.length - 4)];
+        System.arraycopy(v, 4, payload, 0, payload.length);
+        if (cmd == 0x5A && payload.length >= 21 && (payload[0] & 0xFF) == 0xFF) {
+            // alarmes gravados no relogio: 4 x [ligado][tipo][dias][hora][min]
+            int[][] a = new int[4][];
+            for (int i = 0; i < 4; i++) {
+                int o = 1 + i * 5;
+                int type = payload[o + 1] & 0xFF;
+                if ((payload[o + 3] & 0xFF) > 23 || (payload[o + 4] & 0xFF) > 59 || type > 3) return; // formato inesperado
+                a[i] = type == 0 ? null : new int[]{payload[o] & 0xFF, payload[o + 3] & 0xFF, payload[o + 4] & 0xFF,
+                        type == 1 ? 0 : payload[o + 2] & 0xFF};
+            }
+            Prefs.setAlarms(ctx, a);
+            final AlarmsListener l = alarmsListener;
+            if (l != null) main.post(() -> l.onAlarms(a));
+            return;
+        }
+        if (v[2] != 0x03) return;
+        if (cmd == 0x6A) { main.post(() -> FindPhone.toggle(ctx)); return; }
+        if (cmd == 0x65) { main.post(() -> MusicBridge.onWatchCommand(ctx, payload)); return; }
         if (cmd == 0x72 && dialState == DIAL_WAIT_READY) {
             setStatus("Preparando o relógio… " + (v[4] & 0xFF));
         } else if (cmd == 0xC8 && dialState == DIAL_WAIT_READY) {
@@ -251,6 +272,7 @@ public final class WatchLink {
                 if (!g.requestMtu(247)) g.discoverServices();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 boolean wasDial;
+                main.removeCallbacks(heartbeat);
                 synchronized (WatchLink.this) {
                     writeChar = null; writing = false; mtu = 23;
                     wasDial = dialState != DIAL_IDLE;
@@ -372,7 +394,49 @@ public final class WatchLink {
             rawQueue.add(Packet.timeSync(now, java.util.TimeZone.getDefault().getOffset(now)));
         }
         setStatus("Conectado ✔");
+        main.removeCallbacks(heartbeat);
+        main.postDelayed(heartbeat, 60000);
+        rawQueue.add(Packet.alarmsRead());
+        main.post(() -> MusicBridge.sendVolume(ctx));
         pump();
+    }
+
+    /** "To vivo" a cada 60 s enquanto conectado (igual o MActivePro). */
+    private final Runnable heartbeat = new Runnable() {
+        @Override
+        public void run() {
+            synchronized (WatchLink.this) {
+                if (writeChar == null || gatt == null) return;
+                rawQueue.add(Packet.heartbeat());
+                pump();
+            }
+            main.postDelayed(this, 60000);
+        }
+    };
+
+    /** Manda um quadro pronto, se o relogio estiver conectado (senao descarta). */
+    public synchronized void sendRaw(byte[] pkt) {
+        if (writeChar == null || gatt == null) return;
+        rawQueue.add(pkt);
+        pump();
+    }
+
+    public interface AlarmsListener { void onAlarms(int[][] alarms); }
+    private AlarmsListener alarmsListener;
+    public void setAlarmsListener(AlarmsListener l) { alarmsListener = l; }
+
+    public synchronized boolean setAlarms(int[][] alarms) {
+        if (writeChar == null || gatt == null) return false;
+        rawQueue.add(Packet.alarms(alarms));
+        pump();
+        return true;
+    }
+
+    public synchronized boolean setBtName(String name) {
+        if (writeChar == null || gatt == null) return false;
+        rawQueue.add(Packet.btName(name));
+        pump();
+        return true;
     }
 
     /** Faz o relogio vibrar/tocar pra achar ele. */

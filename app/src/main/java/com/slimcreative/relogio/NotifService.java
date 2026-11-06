@@ -18,6 +18,7 @@ public class NotifService extends NotificationListenerService {
     @Override
     public void onListenerConnected() {
         WatchLink.get(this).ensureConnected();
+        MusicBridge.start(this);
     }
 
     @Override

@@ -4,6 +4,7 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.TimePickerDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
@@ -32,6 +33,8 @@ import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -123,6 +126,9 @@ public class MainActivity extends Activity {
         rg.setOnCheckedChangeListener((g, id) -> Prefs.setVibes(this, id - 1000));
         c4.addView(rg);
         c4.addView(text("2x e 3x repetem a mensagem no relógio", 13, Color.GRAY));
+        c4.addView(text("Encontrar celular: use a opção no relógio. O celular toca alto, até no silencioso. "
+                + "Pra parar, use de novo no relógio ou toque em \"Achei!\".", 13, Color.GRAY));
+        c4.addView(button("Parar toque do celular", v -> FindPhone.stop(this)));
         c4.addView(button("Encontrar relógio", v -> {
             if (!WatchLink.get(this).findWatch())
                 Toast.makeText(this, "O relógio não está conectado", Toast.LENGTH_SHORT).show();
@@ -205,6 +211,34 @@ public class MainActivity extends Activity {
             }
             Intent pick = new Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE);
             startActivityForResult(Intent.createChooser(pick, "Escolha a foto"), PICK_PHOTO);
+        }));
+
+        // 6. alarmes
+        LinearLayout c6 = card(root, "6. Alarmes do relógio");
+        c6.addView(text("Até 4 alarmes. Sem nenhum dia marcado, toca uma vez só.", 13, Color.GRAY));
+        int[][] saved = Prefs.alarms(this);
+        for (int i = 0; i < 4; i++) c6.addView(alarmRow(i, saved[i]));
+        c6.addView(button("Salvar alarmes no relógio", v -> {
+            int[][] a = collectAlarms();
+            Prefs.setAlarms(this, a);
+            Toast.makeText(this, WatchLink.get(this).setAlarms(a) ? "Alarmes enviados ✔" : "O relógio não está conectado",
+                    Toast.LENGTH_SHORT).show();
+        }));
+
+        // 7. nome do relogio
+        LinearLayout c7 = card(root, "7. Nome do relógio no Bluetooth");
+        EditText nameEt = new EditText(this);
+        nameEt.setHint("Ex.: Slim Watch");
+        nameEt.setTextColor(Color.WHITE);
+        nameEt.setHintTextColor(Color.GRAY);
+        nameEt.setSingleLine(true);
+        c7.addView(nameEt);
+        c7.addView(button("Trocar nome", v -> {
+            String n = nameEt.getText().toString().trim();
+            if (n.isEmpty()) return;
+            Toast.makeText(this, WatchLink.get(this).setBtName(n)
+                    ? "Nome enviado. Pode precisar reiniciar o relógio pra aparecer" : "O relógio não está conectado",
+                    Toast.LENGTH_LONG).show();
         }));
 
         setContentView(sv);
@@ -296,12 +330,14 @@ public class MainActivity extends Activity {
         watchTv.setText(mac == null ? "Nenhum escolhido" : "Escolhido: " + (n == null ? "?" : n) + " (" + mac + ")");
         WatchLink link = WatchLink.get(this);
         link.setListener(s -> statusTv.setText("Status: " + s));
+        link.setAlarmsListener(this::fillAlarms);
         if (hasBtPerms()) link.ensureConnected();
     }
 
     @Override
     protected void onPause() {
         super.onPause();
+        WatchLink.get(this).setAlarmsListener(null);
         WatchLink.get(this).setListener(null);
         stopScan();
     }
@@ -326,7 +362,12 @@ public class MainActivity extends Activity {
     }
 
     private void askPermissions() {
-        if (!hasBtPerms()) requestPermissions(btPerms(), 1);
+        List<String> need = new ArrayList<>();
+        for (String p : btPerms())
+            if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) need.add(p);
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED)
+            need.add("android.permission.POST_NOTIFICATIONS");
+        if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), 1);
     }
 
     @Override
@@ -449,6 +490,85 @@ public class MainActivity extends Activity {
             checked[k] = on;
             lv.setItemChecked(k, on);
         }
+    }
+
+    // ---------- alarmes ----------
+    private static final String[] DAY_LETTERS = {"S", "T", "Q", "Q", "S", "S", "D"}; // seg..dom
+    private final CheckBox[] alarmOn = new CheckBox[4];
+    private final Button[] alarmTime = new Button[4];
+    private final int[][] alarmHm = new int[4][2];
+    private final int[] alarmDays = new int[4];
+    private final List<List<TextView>> dayViews = new ArrayList<>();
+
+    private LinearLayout alarmRow(int i, int[] a) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(0, dp(8), 0, dp(4));
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        CheckBox on = new CheckBox(this);
+        on.setText("Alarme " + (i + 1));
+        on.setTextColor(Color.WHITE);
+        alarmOn[i] = on;
+        top.addView(on, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Button t = new Button(this);
+        t.setAllCaps(false);
+        alarmTime[i] = t;
+        t.setOnClickListener(v -> new TimePickerDialog(this, (tp, h, m) -> {
+            alarmHm[i][0] = h; alarmHm[i][1] = m; paintAlarm(i);
+        }, alarmHm[i][0], alarmHm[i][1], true).show());
+        top.addView(t);
+        box.addView(top);
+        LinearLayout days = new LinearLayout(this);
+        days.setOrientation(LinearLayout.HORIZONTAL);
+        List<TextView> dv = new ArrayList<>();
+        for (int d = 0; d < 7; d++) {
+            final int bit = Packet.ALARM_DAY_BITS[d];
+            TextView tv = text(DAY_LETTERS[d], 15, Color.WHITE);
+            tv.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(36), 1f);
+            lp.rightMargin = dp(4);
+            tv.setLayoutParams(lp);
+            tv.setOnClickListener(v -> { alarmDays[i] ^= bit; paintAlarm(i); });
+            dv.add(tv);
+            days.addView(tv);
+        }
+        dayViews.add(dv);
+        box.addView(days);
+        setAlarm(i, a);
+        return box;
+    }
+
+    private void setAlarm(int i, int[] a) {
+        alarmOn[i].setChecked(a != null && a[0] != 0);
+        alarmHm[i][0] = a == null ? 7 : a[1];
+        alarmHm[i][1] = a == null ? 0 : a[2];
+        alarmDays[i] = a == null ? 0 : a[3];
+        paintAlarm(i);
+    }
+
+    private void paintAlarm(int i) {
+        alarmTime[i].setText(String.format("%02d:%02d", alarmHm[i][0], alarmHm[i][1]));
+        for (int d = 0; d < 7; d++) {
+            boolean sel = (alarmDays[i] & Packet.ALARM_DAY_BITS[d]) != 0;
+            GradientDrawable g = new GradientDrawable();
+            g.setCornerRadius(dp(18));
+            g.setColor(sel ? ACCENT : Color.parseColor("#333333"));
+            dayViews.get(i).get(d).setBackground(g);
+            dayViews.get(i).get(d).setTextColor(sel ? Color.BLACK : Color.WHITE);
+        }
+    }
+
+    private int[][] collectAlarms() {
+        int[][] a = new int[4][];
+        for (int i = 0; i < 4; i++)
+            a[i] = new int[]{alarmOn[i].isChecked() ? 1 : 0, alarmHm[i][0], alarmHm[i][1], alarmDays[i]};
+        return a;
+    }
+
+    private void fillAlarms(int[][] a) {
+        for (int i = 0; i < 4; i++) setAlarm(i, a[i]);
     }
 
     // ---------- helpers de tela ----------
