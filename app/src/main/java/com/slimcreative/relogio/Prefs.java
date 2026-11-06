@@ -73,6 +73,11 @@ public final class Prefs {
 
     public static void setKeepAlive(Context c, boolean on) { sp(c).edit().putBoolean("keepAlive", on).apply(); }
 
+    /** Chave da API da Anthropic (fica so neste celular). */
+    public static String apiKey(Context c) { return sp(c).getString("apiKey", ""); }
+
+    public static void setApiKey(Context c, String k) { sp(c).edit().putString("apiKey", k).apply(); }
+
     public static void setApps(Context c, Set<String> apps) {
         sp(c).edit().putStringSet("apps", new HashSet<>(apps)).apply();
     }

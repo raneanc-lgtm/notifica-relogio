@@ -63,6 +63,7 @@ public class MainActivity extends Activity {
     private TextView statusTv, notifTv, watchTv;
     private LinearLayout scanList;
     private TextView appsTv;
+    private TextView aiInfoTv;
     private Button scanBtn;
     private boolean scanning;
     private final Map<String, String> found = new LinkedHashMap<>();
@@ -248,6 +249,51 @@ public class MainActivity extends Activity {
                     Toast.LENGTH_LONG).show();
         }));
 
+        // 8. IA (Claude)
+        LinearLayout c8 = card(root, "8. IA no relógio (Claude) — em montagem");
+        c8.addView(text("Chave da API da Anthropic (começa com sk-ant-). Fica guardada só neste celular.", 13, Color.GRAY));
+        EditText keyEt = new EditText(this);
+        keyEt.setHint("sk-ant-...");
+        keyEt.setTextColor(Color.WHITE);
+        keyEt.setHintTextColor(Color.GRAY);
+        keyEt.setSingleLine(true);
+        keyEt.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        keyEt.setText(Prefs.apiKey(this));
+        c8.addView(keyEt);
+        c8.addView(button("Salvar chave", v -> {
+            Prefs.setApiKey(this, keyEt.getText().toString().trim());
+            Toast.makeText(this, "Chave salva", Toast.LENGTH_SHORT).show();
+        }));
+        EditText askEt = new EditText(this);
+        askEt.setHint("Pergunta de teste");
+        askEt.setTextColor(Color.WHITE);
+        askEt.setHintTextColor(Color.GRAY);
+        c8.addView(askEt);
+        TextView answerTv = text("", 14, Color.LTGRAY);
+        c8.addView(button("Perguntar ao Claude (resposta vai pro relógio)", v -> {
+            String key = Prefs.apiKey(this), q = askEt.getText().toString().trim();
+            if (key.isEmpty()) { Toast.makeText(this, "Salve a chave primeiro", Toast.LENGTH_SHORT).show(); return; }
+            if (q.isEmpty()) return;
+            answerTv.setText("Pensando…");
+            new Thread(() -> {
+                String out;
+                try {
+                    out = AiBridge.askClaude(key, q);
+                    String ans = out;
+                    h.post(() -> WatchLink.get(this).sendNotification(Packet.APP_WHATSAPP, "Claude", ans));
+                } catch (Exception e) {
+                    out = "Erro: " + e.getMessage();
+                }
+                String show = out;
+                h.post(() -> answerTv.setText(show));
+            }).start();
+        }));
+        c8.addView(answerTv);
+        aiInfoTv = text("", 13, Color.GRAY);
+        c8.addView(aiInfoTv);
+        c8.addView(text("Pra descobrir o formato do áudio: abre a IA no relógio e fala uma pergunta. "
+                + "O app guarda o áudio em Downloads/NotificaRelogio. Me manda esse arquivo.", 13, Color.GRAY));
+
         setContentView(sv);
         askPermissions();
     }
@@ -336,7 +382,8 @@ public class MainActivity extends Activity {
         String n = Prefs.name(this), mac = Prefs.mac(this);
         watchTv.setText(mac == null ? "Nenhum escolhido" : "Escolhido: " + (n == null ? "?" : n) + " (" + mac + ")");
         WatchLink link = WatchLink.get(this);
-        link.setListener(s -> statusTv.setText("Status: " + s));
+        link.setListener(s -> { statusTv.setText("Status: " + s); aiInfoTv.setText("IA: " + AiBridge.lastInfo()); });
+        aiInfoTv.setText("IA: " + AiBridge.lastInfo());
         link.setAlarmsListener(this::fillAlarms);
         if (hasBtPerms()) link.ensureConnected();
     }

@@ -241,6 +241,7 @@ public final class WatchLink {
             return;
         }
         if (v[2] != 0x03) return;
+        if (cmd == 0x85) { AiBridge.onWatch(ctx, payload); return; }
         if (cmd == 0x6A) { main.post(() -> FindPhone.toggle(ctx)); return; }
         if (cmd == 0x65) { main.post(() -> MusicBridge.onWatchCommand(ctx, payload)); return; }
         if (cmd == 0x72 && dialState == DIAL_WAIT_READY) {
