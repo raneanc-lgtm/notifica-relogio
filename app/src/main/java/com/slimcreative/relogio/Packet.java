@@ -3,46 +3,46 @@ package com.slimcreative.relogio;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Formato capturado do app MActivePro (log NJJ_BLE):
- *   BC 0B 02 [len] | 0B [app] [tamMsg] "Titulo: mensagem" | [checksum]
- * len      = tamanho do bloco de dados (tudo entre len e checksum)
- * tamMsg   = tamanho em bytes so da mensagem (parte depois de "Titulo: ")
- * checksum = soma dos bytes do bloco de dados (8 bits)
- * app 0x0A = WhatsApp (unico codigo confirmado na captura)
+ * Notificacao (comando 0x0B), formato do SDK oficial da NJJ (CmdMergeImpl.sendMessage),
+ * conferido byte a byte com os pacotes do MActivePro:
+ *   BC 0B 02 [len] | [icone] [tam. titulo] [tam. texto] "Titulo" ": " "texto" | [checksum]
+ * tam. titulo nao conta o ": ". checksum = soma dos bytes de dados (8 bits).
+ * Icone 0x0B = WhatsApp neste relogio (o MActivePro mandou 0x0B pro WhatsApp).
  */
 public final class Packet {
-    public static final int APP_WHATSAPP = 0x0A;
+    public static final int APP_WHATSAPP = 0x0B;
+    static final int MAX_TITLE = 60;  // titulo curto pra caber na tela
+    static final int MAX_TEXT = 120;  // limite do SDK
 
     private Packet() {}
 
     /** maxPayload = espaco maximo pro bloco de dados (limitado pelo MTU e por 255). */
-    public static byte[] notification(int appCode, String title, String body, int maxPayload) {
+    public static byte[] notification(int icon, String title, String body, int maxPayload) {
         if (title == null) title = "";
-        if (body == null) body = "";
+        if (body == null || body.trim().isEmpty()) body = " ";
         int limit = Math.min(255, maxPayload);
-        byte[] prefix = (title + ": ").getBytes(StandardCharsets.UTF_8);
-        if (prefix.length > limit - 3 - 4) {
-            prefix = cut(prefix, Math.max(0, limit - 3 - 4));
-        }
-        byte[] msg = body.getBytes(StandardCharsets.UTF_8);
-        int room = limit - 3 - prefix.length;
-        if (msg.length > room) msg = cut(msg, Math.max(0, room));
-        if (msg.length > 255) msg = cut(msg, 255);
+        byte[] t = cut(title.replace('\n', ' ').getBytes(StandardCharsets.UTF_8), MAX_TITLE);
+        byte[] m = cut(body.replace('\n', ' ').getBytes(StandardCharsets.UTF_8), MAX_TEXT);
+        // 3 bytes de cabecalho + titulo + ": " + texto tem que caber no pacote
+        if (3 + t.length + 2 + m.length > limit) m = cut(m, Math.max(1, limit - 3 - t.length - 2));
+        if (3 + t.length + 2 + m.length > limit) t = cut(t, Math.max(0, limit - 3 - 2 - m.length));
 
-        int payloadLen = 3 + prefix.length + msg.length;
+        int payloadLen = 3 + t.length + 2 + m.length;
         byte[] out = new byte[4 + payloadLen + 1];
         out[0] = (byte) 0xBC;
         out[1] = 0x0B;
         out[2] = 0x02;
         out[3] = (byte) payloadLen;
         int p = 4;
-        out[p++] = 0x0B;
-        out[p++] = (byte) appCode;
-        out[p++] = (byte) msg.length;
-        System.arraycopy(prefix, 0, out, p, prefix.length);
-        p += prefix.length;
-        System.arraycopy(msg, 0, out, p, msg.length);
-        p += msg.length;
+        out[p++] = (byte) icon;
+        out[p++] = (byte) t.length;
+        out[p++] = (byte) m.length;
+        System.arraycopy(t, 0, out, p, t.length);
+        p += t.length;
+        out[p++] = 0x3A; // ':'
+        out[p++] = 0x20; // ' '
+        System.arraycopy(m, 0, out, p, m.length);
+        p += m.length;
         int sum = 0;
         for (int i = 4; i < p; i++) sum += out[i] & 0xFF;
         out[p] = (byte) sum;
