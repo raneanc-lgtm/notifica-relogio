@@ -30,9 +30,9 @@ public final class Prefs {
     }
 
     /** Quantas vezes o relogio vibra por mensagem (1 a 3). */
-    public static int vibes(Context c) { return Math.max(1, Math.min(3, sp(c).getInt("vibes", 2))); }
+    public static int vibes(Context c) { return Math.max(1, Math.min(3, sp(c).getInt("vibes2", 1))); }
 
-    public static void setVibes(Context c, int n) { sp(c).edit().putInt("vibes", n).apply(); }
+    public static void setVibes(Context c, int n) { sp(c).edit().putInt("vibes2", n).apply(); }
 
     /** Cor do texto (hora) no fundo personalizado. */
     public static int dialColor(Context c) { return sp(c).getInt("dialColor", 0xFFFFFFFF); }

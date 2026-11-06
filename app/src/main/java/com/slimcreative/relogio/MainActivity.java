@@ -122,6 +122,7 @@ public class MainActivity extends Activity {
         rg.check(1000 + Prefs.vibes(this));
         rg.setOnCheckedChangeListener((g, id) -> Prefs.setVibes(this, id - 1000));
         c4.addView(rg);
+        c4.addView(text("2x e 3x repetem a mensagem no relógio", 13, Color.GRAY));
         c4.addView(button("Encontrar relógio", v -> {
             if (!WatchLink.get(this).findWatch())
                 Toast.makeText(this, "O relógio não está conectado", Toast.LENGTH_SHORT).show();
