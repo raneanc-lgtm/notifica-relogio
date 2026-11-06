@@ -68,6 +68,11 @@ public final class Prefs {
         sp(c).edit().putString("alarms", sb.toString()).apply();
     }
 
+    /** Sinal "to vivo" a cada 60 s. Desligado por padrao (acorda o celular a cada minuto). */
+    public static boolean keepAlive(Context c) { return sp(c).getBoolean("keepAlive", false); }
+
+    public static void setKeepAlive(Context c, boolean on) { sp(c).edit().putBoolean("keepAlive", on).apply(); }
+
     public static void setApps(Context c, Set<String> apps) {
         sp(c).edit().putStringSet("apps", new HashSet<>(apps)).apply();
     }

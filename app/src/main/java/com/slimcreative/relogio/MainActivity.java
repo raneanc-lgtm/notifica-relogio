@@ -126,6 +126,13 @@ public class MainActivity extends Activity {
         rg.setOnCheckedChangeListener((g, id) -> Prefs.setVibes(this, id - 1000));
         c4.addView(rg);
         c4.addView(text("2x e 3x repetem a mensagem no relógio", 13, Color.GRAY));
+        CheckBox keep = new CheckBox(this);
+        keep.setText("Manter conexão firme (manda um sinal ao relógio a cada minuto; gasta um pouco mais de bateria)");
+        keep.setTextColor(Color.WHITE);
+        keep.setChecked(Prefs.keepAlive(this));
+        keep.setOnCheckedChangeListener((cb, on) -> { Prefs.setKeepAlive(this, on); WatchLink.get(this).applyKeepAlive(); });
+        c4.addView(keep);
+        c4.addView(text("Deixe desligado. Só ligue se a conexão com o relógio ficar caindo.", 13, Color.GRAY));
         c4.addView(text("Encontrar celular: use a opção no relógio. O celular toca alto, até no silencioso. "
                 + "Pra parar, use de novo no relógio ou toque em \"Achei!\".", 13, Color.GRAY));
         c4.addView(button("Parar toque do celular", v -> FindPhone.stop(this)));

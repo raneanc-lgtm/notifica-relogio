@@ -395,7 +395,7 @@ public final class WatchLink {
         }
         setStatus("Conectado ✔");
         main.removeCallbacks(heartbeat);
-        main.postDelayed(heartbeat, 60000);
+        if (Prefs.keepAlive(ctx)) main.postDelayed(heartbeat, 60000);
         rawQueue.add(Packet.alarmsRead());
         main.post(() -> MusicBridge.sendVolume(ctx));
         pump();
@@ -406,7 +406,7 @@ public final class WatchLink {
         @Override
         public void run() {
             synchronized (WatchLink.this) {
-                if (writeChar == null || gatt == null) return;
+                if (writeChar == null || gatt == null || !Prefs.keepAlive(ctx)) return;
                 rawQueue.add(Packet.heartbeat());
                 pump();
             }
@@ -419,6 +419,12 @@ public final class WatchLink {
         if (writeChar == null || gatt == null) return;
         rawQueue.add(pkt);
         pump();
+    }
+
+    /** Liga/desliga o "to vivo" na hora. */
+    public synchronized void applyKeepAlive() {
+        main.removeCallbacks(heartbeat);
+        if (Prefs.keepAlive(ctx) && writeChar != null) main.postDelayed(heartbeat, 60000);
     }
 
     public interface AlarmsListener { void onAlarms(int[][] alarms); }
