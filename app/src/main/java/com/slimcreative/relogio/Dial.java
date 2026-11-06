@@ -9,7 +9,7 @@ import android.graphics.Rect;
 
 /**
  * Monta o arquivo de fundo de tela no formato capturado do MActivePro:
- *   16 bytes de cabecalho: 00 00 00 | cor do texto R G B | 00 00 | 360 | 360 | 240 | 240 (u16 little-endian)
+ *   16 bytes de cabecalho: [posicao do texto: 00 em cima, 01 embaixo] 00 00 | cor do texto R G B | 00 00 | 360 | 360 | 240 | 240 (u16 little-endian)
  *   imagem 360x360 RGB565 (big-endian), recortada em circulo com fundo preto
  *   miniatura 240x240 RGB565 (big-endian), igual
  */
@@ -34,10 +34,11 @@ public final class Dial {
         return out;
     }
 
-    public static byte[] build(Bitmap photo, int textColor) {
+    public static byte[] build(Bitmap photo, int textColor, int textPosition) {
         Bitmap big = round(photo, SIZE);
         Bitmap small = round(photo, THUMB);
         byte[] out = new byte[16 + SIZE * SIZE * 2 + THUMB * THUMB * 2];
+        out[0] = (byte) textPosition;
         out[3] = (byte) Color.red(textColor);
         out[4] = (byte) Color.green(textColor);
         out[5] = (byte) Color.blue(textColor);

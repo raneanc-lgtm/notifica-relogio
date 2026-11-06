@@ -165,6 +165,22 @@ public class MainActivity extends Activity {
             row.addView(sw);
         }
         paintSwatches();
+        c5.addView(text("Posição da hora", 14, Color.LTGRAY));
+        RadioGroup pos = new RadioGroup(this);
+        pos.setOrientation(RadioGroup.HORIZONTAL);
+        String[] posNames = {"Em cima", "Embaixo"};
+        for (int i = 0; i < posNames.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setId(2000 + i);
+            rb.setText(posNames[i]);
+            rb.setTextColor(Color.WHITE);
+            rb.setTextSize(16);
+            rb.setPadding(0, 0, dp(24), 0);
+            pos.addView(rb);
+        }
+        pos.check(2000 + Prefs.dialPosition(this));
+        pos.setOnCheckedChangeListener((g, id) -> Prefs.setDialPosition(this, id - 2000));
+        c5.addView(pos);
         c5.addView(button("Escolher foto e mandar pro relógio", v -> {
             if (WatchLink.get(this).isSendingDial()) {
                 Toast.makeText(this, "Espera terminar o envio atual", Toast.LENGTH_SHORT).show();
@@ -206,7 +222,7 @@ public class MainActivity extends Activity {
                 Bitmap photo = loadScaled(uri, 1080);
                 if (photo == null) throw new Exception("não consegui abrir essa foto");
                 Bitmap shown = Dial.round(photo, Dial.SIZE);
-                byte[] file = Dial.build(photo, Prefs.dialColor(this));
+                byte[] file = Dial.build(photo, Prefs.dialColor(this), Prefs.dialPosition(this));
                 photo.recycle();
                 h.post(() -> {
                     preview.setImageBitmap(shown);

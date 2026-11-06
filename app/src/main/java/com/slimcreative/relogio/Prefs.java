@@ -39,6 +39,11 @@ public final class Prefs {
 
     public static void setDialColor(Context c, int color) { sp(c).edit().putInt("dialColor", color).apply(); }
 
+    /** Posicao do texto no fundo personalizado: 0 em cima, 1 embaixo. */
+    public static int dialPosition(Context c) { return sp(c).getInt("dialPos", 0); }
+
+    public static void setDialPosition(Context c, int pos) { sp(c).edit().putInt("dialPos", pos).apply(); }
+
     public static void setApps(Context c, Set<String> apps) {
         sp(c).edit().putStringSet("apps", new HashSet<>(apps)).apply();
     }
