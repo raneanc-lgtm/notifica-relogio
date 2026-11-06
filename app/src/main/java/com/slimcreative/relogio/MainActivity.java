@@ -131,6 +131,22 @@ public class MainActivity extends Activity {
             WatchLink.get(this).sendNotification(Packet.APP_WHATSAPP, "Teste", "Funcionou!");
             Toast.makeText(this, "Enviado", Toast.LENGTH_SHORT).show();
         }));
+        c4.addView(text("Teste de ícones (temporário): manda \"Ícone 0\" até \"Ícone " + WatchLink.ICON_TEST_LAST
+                + "\", um a cada 3 segundos. Grava um vídeo do relógio enquanto roda.", 13, Color.GRAY));
+        Button iconTest = button("Testar ícones", null);
+        iconTest.setOnClickListener(v -> {
+            WatchLink link = WatchLink.get(this);
+            if (link.isIconTestRunning()) {
+                link.stopIconTest();
+                iconTest.setText("Testar ícones");
+            } else if (!link.isReady()) {
+                Toast.makeText(this, "O relógio não está conectado", Toast.LENGTH_SHORT).show();
+            } else {
+                link.startIconTest();
+                iconTest.setText("Parar teste de ícones");
+            }
+        });
+        c4.addView(iconTest);
 
         // 5. fundo da tela
         LinearLayout c5 = card(root, "5. Fundo da tela do relógio");

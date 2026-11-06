@@ -140,6 +140,35 @@ public final class WatchLink {
         enqueue(app, title, body);
     }
 
+    // ---------- teste de icones (temporario) ----------
+    public static final int ICON_TEST_LAST = 40;
+    private int iconTestNext = -1;
+
+    public synchronized boolean isIconTestRunning() { return iconTestNext >= 0; }
+
+    /** Manda "Ícone 0" ate "Ícone 40", um a cada 3 s, cada um com o codigo de icone do numero. */
+    public synchronized void startIconTest() {
+        if (iconTestNext >= 0) return;
+        iconTestNext = 0;
+        main.post(this::iconTestStep);
+    }
+
+    public synchronized void stopIconTest() { iconTestNext = -1; }
+
+    private synchronized void iconTestStep() {
+        if (iconTestNext < 0) return;
+        int code = iconTestNext;
+        enqueue(code, "Ícone " + code, "Número " + code);
+        setStatus("Testando ícones… " + code + " de " + ICON_TEST_LAST);
+        if (code >= ICON_TEST_LAST) {
+            iconTestNext = -1;
+            main.postDelayed(() -> setStatus("Teste de ícones terminado ✔"), 1500);
+        } else {
+            iconTestNext = code + 1;
+            main.postDelayed(this::iconTestStep, 3000);
+        }
+    }
+
     private synchronized void enqueue(int app, String title, String body) {
         queue.add(new String[]{String.valueOf(app), title, body});
         while (queue.size() > 10) queue.poll();
