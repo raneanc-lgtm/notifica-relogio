@@ -2,8 +2,16 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path android:fillColor="#25D366" android:pathData="M44,30h20v8h-20z M44,70h20v8h-20z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M40,36h28a6,6 0 0 1 6,6v24a6,6 0 0 1 -6,6h-28a6,6 0 0 1 -6,-6v-24a6,6 0 0 1 6,-6z" />
-    <path android:fillColor="#121212" android:pathData="M42,40h24a4,4 0 0 1 4,4v20a4,4 0 0 1 -4,4h-24a4,4 0 0 1 -4,-4v-20a4,4 0 0 1 4,-4z" />
-    <path android:fillColor="#25D366" android:pathData="M54,46a8,8 0 1 1 0,16a8,8 0 1 1 0,-16z" />
+    <!-- pulseira -->
+    <path android:fillColor="#99FFFFFF" android:pathData="M45,27h18a3,3 0 0 1 3,3v10h-24v-10a3,3 0 0 1 3,-3z" />
+    <path android:fillColor="#99FFFFFF" android:pathData="M42,68h24v10a3,3 0 0 1 -3,3h-18a3,3 0 0 1 -3,-3z" />
+    <!-- caixa -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M35,54a19,19 0 1 0 38,0a19,19 0 1 0 -38,0z" />
+    <path android:fillColor="#FF121A2E" android:pathData="M39,54a15,15 0 1 0 30,0a15,15 0 1 0 -30,0z" />
+    <!-- ponteiros -->
+    <path android:strokeColor="#FF3DDC97" android:strokeWidth="3" android:strokeLineCap="round"
+        android:pathData="M54,54L54,45 M54,54L61,58" />
+    <!-- aviso -->
+    <path android:fillColor="#FF1B2440" android:pathData="M61,38a9,9 0 1 0 18,0a9,9 0 1 0 -18,0z" />
+    <path android:fillColor="#FFFF5A5F" android:pathData="M63.5,38a6.5,6.5 0 1 0 13,0a6.5,6.5 0 1 0 -13,0z" />
 </vector>
