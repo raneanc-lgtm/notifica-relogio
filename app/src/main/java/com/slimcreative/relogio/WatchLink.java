@@ -10,7 +10,16 @@ import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -53,46 +62,197 @@ public final class WatchLink {
     private volatile String status = "Desconectado";
     private Listener listener;
 
-    private WatchLink(Context c) { ctx = c; }
+    private WatchLink(Context c) {
+        ctx = c;
+        try {
+            IntentFilter f = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
+            if (Build.VERSION.SDK_INT >= 33) ctx.registerReceiver(btReceiver, f, Context.RECEIVER_NOT_EXPORTED);
+            else ctx.registerReceiver(btReceiver, f);
+        } catch (Exception ignored) {}
+    }
 
     public void setListener(Listener l) { listener = l; if (l != null) l.onStatus(status); }
 
     public String getStatus() { return status; }
 
     private void setStatus(String s) {
+        if (!s.equals(status) && !s.startsWith("Enviando a imagem") && !s.startsWith("Testando ícones")) log(s);
         status = s;
         Log.i(TAG, s);
         final Listener l = listener;
         if (l != null) main.post(() -> l.onStatus(s));
     }
 
-    /** Garante que existe uma conexao (ou pedido de conexao) com o relogio salvo. */
+    // ---------- conexao ----------
+    private boolean linkUp;          // entre CONNECTED e DISCONNECTED
+    private boolean scanning;
+    private long connectStartedAt;
+    private int attempt;
+    private static final long[] RETRY_MS = {15000, 60000, 120000, 300000, 600000, 900000};
+    private final ArrayDeque<String> logLines = new ArrayDeque<>();
+
+    private synchronized void log(String s) {
+        logLines.add(new java.text.SimpleDateFormat("dd/MM HH:mm:ss", java.util.Locale.US).format(new java.util.Date()) + "  " + s);
+        while (logLines.size() > 60) logLines.poll();
+    }
+
+    /** Registro dos ultimos eventos da conexao, pra diagnostico. */
+    public synchronized String logText() {
+        StringBuilder sb = new StringBuilder();
+        for (String l : logLines) sb.append(l).append('\n');
+        return sb.toString();
+    }
+
+    private BluetoothAdapter adapter() {
+        BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
+        return bm == null ? null : bm.getAdapter();
+    }
+
+    private final Runnable retry = () -> { synchronized (WatchLink.this) { if (!linkUp) startConnect(); } };
+    private final Runnable scanTimeout = this::onScanTimeout;
+    private final Runnable setupWatchdog = () -> {
+        synchronized (WatchLink.this) {
+            if (linkUp && writeChar == null) { log("preparo travou: reiniciando a conexão"); startConnect(); }
+        }
+    };
+
+    /** Garante que existe uma conexao (ou tentativa em andamento) com o relogio salvo. */
     public synchronized void ensureConnected() {
         String mac = Prefs.mac(ctx);
         if (mac == null) { setStatus("Nenhum relógio escolhido"); return; }
-        if (gatt != null && mac.equals(connectedMac)) return;
+        if (mac.equals(connectedMac) && (linkUp || scanning || gatt != null)) return;
+        attempt = 0;
+        startConnect();
+    }
+
+    /** Botao "Reconectar agora": larga tudo e comeca do zero. */
+    public synchronized void reconnectNow() {
+        attempt = 0;
+        log("reconectar agora (pedido na tela)");
+        startConnect();
+    }
+
+    /** Procura o relogio por ate 12 s e conecta direto; se nao achar, deixa o Android esperando ele voltar. */
+    private synchronized void startConnect() {
+        main.removeCallbacks(retry);
+        main.removeCallbacks(scanTimeout);
+        main.removeCallbacks(setupWatchdog);
+        stopScan();
         disconnect();
-        BluetoothManager bm = (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
-        BluetoothAdapter ad = bm == null ? null : bm.getAdapter();
+        String mac = Prefs.mac(ctx);
+        if (mac == null) { setStatus("Nenhum relógio escolhido"); return; }
+        BluetoothAdapter ad = adapter();
         if (ad == null || !ad.isEnabled()) { setStatus("Bluetooth desligado"); return; }
+        connectedMac = mac;
+        setStatus("Procurando o relógio…");
         try {
-            BluetoothDevice dev = ad.getRemoteDevice(mac);
-            connectedMac = mac;
-            setStatus("Procurando o relógio…");
-            gatt = dev.connectGatt(ctx, true, callback, BluetoothDevice.TRANSPORT_LE);
+            BluetoothLeScanner sc = ad.getBluetoothLeScanner();
+            java.util.List<ScanFilter> f = java.util.Collections.singletonList(new ScanFilter.Builder().setDeviceAddress(mac).build());
+            sc.startScan(f, new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), scanCb);
+            scanning = true;
+            main.postDelayed(scanTimeout, 12000);
         } catch (Exception e) {
-            setStatus("Erro ao conectar: " + e.getMessage());
-            gatt = null;
+            log("busca não iniciou: " + e);
+            waitInBackground();
         }
     }
 
+    private synchronized void stopScan() {
+        if (!scanning) return;
+        scanning = false;
+        try {
+            BluetoothAdapter ad = adapter();
+            if (ad != null && ad.getBluetoothLeScanner() != null) ad.getBluetoothLeScanner().stopScan(scanCb);
+        } catch (Exception ignored) {}
+    }
+
+    private final ScanCallback scanCb = new ScanCallback() {
+        @Override
+        public void onScanResult(int type, ScanResult r) {
+            synchronized (WatchLink.this) {
+                if (!scanning) return;
+                main.removeCallbacks(scanTimeout);
+                stopScan();
+                log("relógio achado (sinal " + r.getRssi() + "), conectando");
+                setStatus("Conectando…");
+                try {
+                    connectStartedAt = System.currentTimeMillis();
+                    gatt = r.getDevice().connectGatt(ctx, false, callback, BluetoothDevice.TRANSPORT_LE);
+                    main.postDelayed(retry, 30000); // se nem conectar em 30 s, recomeca
+                } catch (Exception e) {
+                    log("erro ao conectar: " + e);
+                    waitInBackground();
+                }
+            }
+        }
+
+        @Override
+        public void onScanFailed(int code) {
+            synchronized (WatchLink.this) {
+                scanning = false;
+                main.removeCallbacks(scanTimeout);
+                log("busca falhou (código " + code + ")");
+                waitInBackground();
+            }
+        }
+    };
+
+    private synchronized void onScanTimeout() {
+        if (!scanning) return;
+        stopScan();
+        log("relógio não apareceu na busca");
+        waitInBackground();
+    }
+
+    /** Deixa o Android esperando o relogio (barato) e marca uma nova busca pra mais tarde. */
+    private synchronized void waitInBackground() {
+        String mac = Prefs.mac(ctx);
+        BluetoothAdapter ad = adapter();
+        if (mac == null || ad == null || !ad.isEnabled()) return;
+        try {
+            if (gatt == null) gatt = ad.getRemoteDevice(mac).connectGatt(ctx, true, callback, BluetoothDevice.TRANSPORT_LE);
+        } catch (Exception e) {
+            log("espera não iniciou: " + e);
+        }
+        long wait = RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)];
+        attempt++;
+        setStatus("Relógio fora de alcance (nova busca em " + (wait >= 60000 ? (wait / 60000) + " min" : (wait / 1000) + " s") + ")");
+        main.removeCallbacks(retry);
+        main.postDelayed(retry, wait);
+    }
+
+    /** Bluetooth do celular ligou/desligou: as conexoes antigas morrem, entao recomeca. */
+    private final BroadcastReceiver btReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            int st = i.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1);
+            synchronized (WatchLink.this) {
+                if (st == BluetoothAdapter.STATE_ON) {
+                    log("Bluetooth do celular ligou");
+                    attempt = 0;
+                    startConnect();
+                } else if (st == BluetoothAdapter.STATE_OFF) {
+                    log("Bluetooth do celular desligou");
+                    main.removeCallbacks(retry);
+                    main.removeCallbacks(scanTimeout);
+                    scanning = false;
+                    linkUp = false;
+                    disconnect();
+                    setStatus("Bluetooth desligado");
+                }
+            }
+        }
+    };
+
     public synchronized void disconnect() {
+        main.removeCallbacks(heartbeat);
         if (gatt != null) {
             try { gatt.disconnect(); gatt.close(); } catch (Exception ignored) {}
         }
         gatt = null;
         writeChar = null;
         connectedMac = null;
+        linkUp = false;
         writing = false;
         mtu = 23;
         dialState = DIAL_IDLE;
@@ -265,34 +425,54 @@ public final class WatchLink {
         }
     }
 
+    private boolean servicesAsked;
+
+    private void askServices(BluetoothGatt g) {
+        synchronized (this) {
+            if (g != gatt || !linkUp || servicesAsked) return;
+            servicesAsked = true;
+        }
+        try { g.discoverServices(); } catch (Exception e) { log("serviços: " + e); }
+    }
+
     private final BluetoothGattCallback callback = new BluetoothGattCallback() {
         @Override
         public void onConnectionStateChange(BluetoothGatt g, int st, int newState) {
+            synchronized (WatchLink.this) { if (g != gatt) { try { g.close(); } catch (Exception ignored) {} return; } }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
+                synchronized (WatchLink.this) { linkUp = true; attempt = 0; servicesAsked = false; }
+                main.removeCallbacks(retry);
+                log("conectado (código " + st + ")");
                 setStatus("Conectado, preparando…");
-                if (!g.requestMtu(247)) g.discoverServices();
+                // pequena espera antes de mexer; se o MTU nao responder em 2 s, segue sem ele
+                main.postDelayed(() -> { try { if (!g.requestMtu(247)) askServices(g); } catch (Exception e) { askServices(g); } }, 600);
+                main.postDelayed(() -> askServices(g), 2600);
+                main.removeCallbacks(setupWatchdog);
+                main.postDelayed(setupWatchdog, 25000);
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 boolean wasDial;
                 main.removeCallbacks(heartbeat);
+                main.removeCallbacks(setupWatchdog);
                 synchronized (WatchLink.this) {
+                    linkUp = false;
                     writeChar = null; writing = false; mtu = 23;
                     wasDial = dialState != DIAL_IDLE;
                     dialState = DIAL_IDLE; dialFile = null; rawQueue.clear();
                 }
-                setStatus(wasDial ? "A conexão caiu no meio do envio da imagem. Tenta de novo"
-                        : "Relógio fora de alcance (reconecta sozinho)");
-                if (st != BluetoothGatt.GATT_SUCCESS && g == gatt) {
-                    // erro de conexao: fecha e tenta de novo daqui a pouco
-                    synchronized (WatchLink.this) { disconnect(); }
-                    main.postDelayed(WatchLink.this::ensureConnected, 15000);
-                }
+                log("desconectou (código " + st + ")");
+                setStatus(wasDial ? "A conexão caiu no meio do envio da imagem. Tenta de novo" : "Relógio desconectou, procurando de novo…");
+                long wait = RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)];
+                synchronized (WatchLink.this) { attempt++; }
+                main.removeCallbacks(retry);
+                main.postDelayed(retry, Math.min(wait, 5000 + 10000L * Math.max(0, attempt - 1)));
             }
         }
 
         @Override
         public void onMtuChanged(BluetoothGatt g, int newMtu, int st) {
             if (st == BluetoothGatt.GATT_SUCCESS) mtu = newMtu;
-            g.discoverServices();
+            log("MTU " + newMtu + " (código " + st + ")");
+            askServices(g);
         }
 
         @Override

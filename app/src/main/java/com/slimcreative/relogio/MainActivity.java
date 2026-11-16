@@ -124,6 +124,10 @@ public class MainActivity extends Activity {
         LinearLayout cWatch = card(home, "Meu relógio", null);
         watchTv = text("", 15, TEXT);
         cWatch.addView(watchTv);
+        cWatch.addView(primaryBtn("Reconectar agora", v -> {
+            if (Prefs.mac(this) == null) { toast("Escolha o relógio primeiro"); return; }
+            WatchLink.get(this).reconnectNow();
+        }));
         scanBtn = secondaryBtn("Procurar relógio", v -> startScan());
         cWatch.addView(scanBtn);
         scanList = new LinearLayout(this);
@@ -269,6 +273,22 @@ public class MainActivity extends Activity {
         aiInfoTv = caption("");
         cAi.addView(aiInfoTv);
         cAi.addView(caption("A resposta também vai pro relógio. O áudio da IA do relógio fica em Downloads/NotificaRelogio."));
+
+        LinearLayout cLog = card(mais, "Diagnóstico da conexão", "Últimos eventos da conexão com o relógio.");
+        TextView logTv = caption("");
+        logTv.setTextIsSelectable(true);
+        cLog.addView(secondaryBtn("Atualizar", v -> {
+            String t = WatchLink.get(this).logText();
+            logTv.setText(t.isEmpty() ? "Nada registrado ainda" : t);
+        }));
+        cLog.addView(secondaryBtn("Copiar", v -> {
+            String t = WatchLink.get(this).logText();
+            ((android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE))
+                    .setPrimaryClip(android.content.ClipData.newPlainText("conexão", t));
+            logTv.setText(t.isEmpty() ? "Nada registrado ainda" : t);
+            toast("Copiado");
+        }));
+        cLog.addView(logTv);
 
         LinearLayout cIcons = card(mais, "Teste de ícones (temporário)",
                 "Manda \"Ícone 0\" até \"Ícone " + WatchLink.ICON_TEST_LAST + "\", um a cada 3 segundos. Grave um vídeo do relógio enquanto roda.");
