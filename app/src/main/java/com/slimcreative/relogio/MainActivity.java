@@ -74,7 +74,8 @@ public class MainActivity extends Activity {
     private static final int WARN = Color.parseColor("#FFB454");
     private static final int BAD = Color.parseColor("#FF6B6B");
 
-    private static final String[] TAB_ICONS = {"🏠", "🔔", "🖼", "⌚", "⋯"};
+    private static final int[] TAB_ICONS = {R.drawable.ic_tab_home, R.drawable.ic_tab_bell, R.drawable.ic_tab_image,
+            R.drawable.ic_tab_watch, R.drawable.ic_tab_more};
     private static final String[] TAB_NAMES = {"Início", "Avisos", "Tela", "Relógio", "Mais"};
     private final View[] pages = new View[5];
     private final LinearLayout[] tabs = new LinearLayout[5];
@@ -218,7 +219,7 @@ public class MainActivity extends Activity {
         cAlarm.addView(primaryBtn("Salvar alarmes no relógio", v -> {
             int[][] a = collectAlarms();
             Prefs.setAlarms(this, a);
-            toast(WatchLink.get(this).setAlarms(a) ? "Alarmes enviados ✔" : "O relógio não está conectado");
+            toast(WatchLink.get(this).setAlarms(a) ? "Alarmes enviados" : "O relógio não está conectado");
         }));
 
         LinearLayout cName = card(relogio, "Nome no Bluetooth", null);
@@ -324,8 +325,9 @@ public class MainActivity extends Activity {
             t.setOrientation(LinearLayout.VERTICAL);
             t.setGravity(Gravity.CENTER);
             t.setPadding(0, dp(6), 0, dp(6));
-            TextView ic = text(TAB_ICONS[i], 18, TEXT);
-            ic.setGravity(Gravity.CENTER);
+            ImageView ic = new ImageView(this);
+            ic.setImageResource(TAB_ICONS[i]);
+            ic.setLayoutParams(new LinearLayout.LayoutParams(dp(24), dp(24)));
             TextView nm = text(TAB_NAMES[i], 12, MUTED);
             nm.setGravity(Gravity.CENTER);
             t.addView(ic);
@@ -355,6 +357,7 @@ public class MainActivity extends Activity {
             pages[i].setVisibility(i == idx ? View.VISIBLE : View.GONE);
             boolean sel = i == idx;
             tabs[i].setBackground(sel ? round(FIELD, 14) : null);
+            ((ImageView) tabs[i].getChildAt(0)).setImageTintList(ColorStateList.valueOf(sel ? ACCENT : MUTED));
             ((TextView) tabs[i].getChildAt(1)).setTextColor(sel ? ACCENT : MUTED);
             ((TextView) tabs[i].getChildAt(1)).setTypeface(sel ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
         }
@@ -365,7 +368,7 @@ public class MainActivity extends Activity {
         statusTv.setText(s);
         String l = s.toLowerCase();
         int c = WARN;
-        if (l.contains("✔") || l.startsWith("conectado") || l.startsWith("enviando") || l.startsWith("testando")) c = ACCENT;
+        if (l.contains("trocado") || l.contains("enviado") || l.contains("terminado") || l.startsWith("conectado") || l.startsWith("enviando") || l.startsWith("testando")) c = ACCENT;
         if (l.contains("erro") || l.contains("falha") || l.contains("desligado") || l.contains("nenhum")
                 || l.contains("recusou") || l.contains("caiu") || l.contains("não")) c = BAD;
         GradientDrawable d = new GradientDrawable();
@@ -454,7 +457,7 @@ public class MainActivity extends Activity {
         super.onResume();
         updateAppsText();
         boolean ok = notifAccess();
-        notifTv.setText(ok ? "Liberado ✔" : "Ainda não liberado. Toque abaixo e ative \"Notifica Relógio\".");
+        notifTv.setText(ok ? "Liberado" : "Ainda não liberado. Toque abaixo e ative \"Notifica Relógio\".");
         notifTv.setTextColor(ok ? ACCENT : WARN);
         notifBtn.setVisibility(ok ? View.GONE : View.VISIBLE);
         scanBtn.setText(Prefs.mac(this) == null ? "Procurar relógio" : "Trocar de relógio");

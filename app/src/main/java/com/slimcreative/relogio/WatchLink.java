@@ -322,7 +322,7 @@ public final class WatchLink {
         setStatus("Testando ícones… " + code + " de " + ICON_TEST_LAST);
         if (code >= ICON_TEST_LAST) {
             iconTestNext = -1;
-            main.postDelayed(() -> setStatus("Teste de ícones terminado ✔"), 1500);
+            main.postDelayed(() -> setStatus("Teste de ícones terminado"), 1500);
         } else {
             iconTestNext = code + 1;
             main.postDelayed(this::iconTestStep, 3000);
@@ -402,7 +402,12 @@ public final class WatchLink {
         }
         if (v[2] != 0x03) return;
         if (cmd == 0x85) { AiBridge.onWatch(ctx, payload); return; }
-        if (cmd == 0x6A) { main.post(() -> FindPhone.toggle(ctx)); return; }
+        if (cmd == 0x6A) {
+            // so toca quando o relogio pede de verdade (valor 1); qualquer outro valor so para
+            final boolean ask = payload.length > 0 && payload[0] == 1;
+            main.post(() -> { if (ask) FindPhone.toggle(ctx); else FindPhone.stop(ctx); });
+            return;
+        }
         if (cmd == 0x65) { main.post(() -> MusicBridge.onWatchCommand(ctx, payload)); return; }
         if (cmd == 0x72 && dialState == DIAL_WAIT_READY) {
             setStatus("Preparando o relógio… " + (v[4] & 0xFF));
@@ -417,7 +422,7 @@ public final class WatchLink {
             dialFile = null;
             if (result == 0) {
                 rawQueue.add(Packet.dialEnd());
-                setStatus("Fundo da tela trocado ✔");
+                setStatus("Fundo da tela trocado");
             } else {
                 setStatus("O relógio recusou a imagem (código " + result + ")");
             }
@@ -535,7 +540,7 @@ public final class WatchLink {
             boolean dial;
             synchronized (WatchLink.this) { dial = dialState != DIAL_IDLE; }
             if (st != BluetoothGatt.GATT_SUCCESS) setStatus("Falha no envio (código " + st + ")");
-            else if (!dial && lastPkt != null) setStatus("Enviado pro relógio ✔");
+            else if (!dial && lastPkt != null) setStatus("Enviado pro relógio");
             pump();
         }
     };
@@ -574,7 +579,7 @@ public final class WatchLink {
             long now = System.currentTimeMillis();
             rawQueue.add(Packet.timeSync(now, java.util.TimeZone.getDefault().getOffset(now)));
         }
-        setStatus("Conectado ✔");
+        setStatus("Conectado");
         main.removeCallbacks(heartbeat);
         if (Prefs.keepAlive(ctx)) main.postDelayed(heartbeat, 60000);
         rawQueue.add(Packet.alarmsRead());
